@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.RegularExpressions;
@@ -24,30 +25,6 @@ namespace CustomRPC
     /*
      * TODO: profiles not as external files
      */
-
-    /// <summary>
-    /// A struct for handling preset importing/exporting.
-    /// </summary>
-    [Serializable]
-    public struct Preset
-    {
-        public string ID;
-        public int Type;
-        public string Details;
-        public string State;
-        public int PartySize;
-        public int PartyMax;
-        public int Timestamps;
-        public DateTime CustomTimestamp;
-        public string LargeKey;
-        public string LargeText;
-        public string SmallKey;
-        public string SmallText;
-        public string Button1Text;
-        public string Button1URL;
-        public string Button2Text;
-        public string Button2URL;
-    }
 
     /// <summary>
     /// A struct for getting available image assets for current application.
@@ -89,6 +66,11 @@ namespace CustomRPC
     public partial class MainForm : Form
     {
         /// <summary>
+        /// The list of all the presets in the user's set preset directory.
+        /// </summary>
+        public List<Preset> presetsInDirectory = new List<Preset>();
+
+        /// <summary>
         /// Discord RPC Client.
         /// </summary>
         DiscordRpcClient client;
@@ -97,6 +79,11 @@ namespace CustomRPC
         /// List of presence buttons.
         /// </summary>
         List<DButton> buttonsList = new List<DButton>();
+
+        /// <summary>
+        /// The directory in which presets are located.
+        /// </summary>
+        Uri presetDirectory = null;
 
         /// <summary>
         /// Prevents some event handlers from executing while the app is loading.
@@ -357,6 +344,11 @@ namespace CustomRPC
 
             if (settings.id != "" && ((settings.changedLanguage && settings.wasConnected) || (settings.autoconnect && !settings.changedLanguage)))
                 Connect();
+
+            if (settings.presetDirectory != null && Uri.TryCreate(settings.presetDirectory, UriKind.Absolute, out presetDirectory))
+            {
+                this.LoadPresetsFromDirectory(presetDirectory);
+            }
 
             CheckIfCrashed();
 
@@ -1097,57 +1089,100 @@ namespace CustomRPC
         }
 
         /// <summary>
-        /// Base function for loading a preset.
+        /// Maps the file denoted in <paramref name="file"/> to a <see cref="Preset"/> object.
+        /// </summary>
+        /// <param name="file">The preset file.</param>
+        /// <returns>The mapped <see cref="Preset"/>.</returns>
+        private Preset MapPreset(FileInfo file)
+        {
+            Preset preset = null;
+            preset = this.MapPreset(file.OpenRead());
+
+            // If the file doesn't have a friendly name (because it was created in a previous version of the app), set it now.
+            if (preset != null && string.IsNullOrWhiteSpace(preset.FriendlyName))
+            {
+                preset.FriendlyName = file.Name
+                .Replace("_", " ")
+                .Replace("-", " ")
+                .Replace(".crp", string.Empty)
+                .Trim();
+            }
+
+            return preset;
+        }
+
+        /// <summary>
+        /// Maps the file stream to a <see cref="Preset"/> object."/>
+        /// </summary>
+        /// <param name="file">The preset file stream.</param>
+        /// <returns>The mapped preset.</returns>
+        private Preset MapPreset(Stream file)
+        {
+            Preset preset = null;
+            var xmlSerializer = new XmlSerializer(typeof(Preset));
+            preset = (Preset)xmlSerializer.Deserialize(file);
+            return preset;
+        }
+
+        /// <summary>
+        /// Loads a preset from a <see cref="Preset"/> object.
+        /// </summary>
+        /// <param name="preset">The preset to load.</param>
+        private void LoadPreset(Preset preset)
+        {
+            bool wasConnected = buttonDisconnect.Enabled;
+            bool isNewID = settings.id != preset.ID;
+
+            settings.id = preset.ID;
+            settings.type = preset.Type;
+            settings.details = preset.Details;
+            settings.state = preset.State;
+            settings.partySize = preset.PartySize;
+            settings.partyMax = preset.PartyMax;
+            settings.timestamps = preset.Timestamps;
+            settings.customTimestamp = preset.CustomTimestamp;
+            settings.largeKey = preset.LargeKey;
+            settings.largeText = preset.LargeText;
+            settings.smallKey = preset.SmallKey;
+            settings.smallText = preset.SmallText;
+            settings.button1Text = preset.Button1Text;
+            settings.button1URL = preset.Button1URL;
+            settings.button2Text = preset.Button2Text;
+            settings.button2URL = preset.Button2URL;
+            Utils.SaveSettings();
+
+            comboBoxType.SelectedValue = (ActivityType)settings.type;
+
+            switch ((TimestampType)settings.timestamps)
+            {
+                case TimestampType.None: radioButtonNone.Checked = true; break;
+                case TimestampType.SinceStartup: radioButtonStartTime.Checked = true; break;
+                case TimestampType.SincePresenceUpdate: radioButtonPresence.Checked = true; break;
+                case TimestampType.LocalTime: radioButtonLocalTime.Checked = true; break;
+                case TimestampType.Custom: radioButtonCustom.Checked = true; break;
+            }
+
+            Analytics.TrackEvent("Loaded a preset");
+
+            if (!wasConnected)
+                return;
+
+            if (isNewID || ConnectionManager.State != ConnectionState.Connected)
+                Reconnect();
+            else
+                SetPresence();
+        }
+
+        /// <summary>
+        /// Loads a preset from a file stream.
         /// </summary>
         /// <param name="file">A file stream of the preset file.</param>
         private void LoadPreset(Stream file)
         {
             try
             {
-                var xs = new XmlSerializer(typeof(Preset)); // Using XML here because... why not? Settings are already saved in XML
-                var preset = (Preset)xs.Deserialize(file);
-
-                bool wasConnected = buttonDisconnect.Enabled;
-                bool isNewID = settings.id != preset.ID;
-
-                settings.id = preset.ID;
-                settings.type = preset.Type;
-                settings.details = preset.Details;
-                settings.state = preset.State;
-                settings.partySize = preset.PartySize;
-                settings.partyMax = preset.PartyMax;
-                settings.timestamps = preset.Timestamps;
-                settings.customTimestamp = preset.CustomTimestamp;
-                settings.largeKey = preset.LargeKey;
-                settings.largeText = preset.LargeText;
-                settings.smallKey = preset.SmallKey;
-                settings.smallText = preset.SmallText;
-                settings.button1Text = preset.Button1Text;
-                settings.button1URL = preset.Button1URL;
-                settings.button2Text = preset.Button2Text;
-                settings.button2URL = preset.Button2URL;
-                Utils.SaveSettings();
-
-                comboBoxType.SelectedValue = (ActivityType)settings.type;
-
-                switch ((TimestampType)settings.timestamps)
-                {
-                    case TimestampType.None: radioButtonNone.Checked = true; break;
-                    case TimestampType.SinceStartup: radioButtonStartTime.Checked = true; break;
-                    case TimestampType.SincePresenceUpdate: radioButtonPresence.Checked = true; break;
-                    case TimestampType.LocalTime: radioButtonLocalTime.Checked = true; break;
-                    case TimestampType.Custom: radioButtonCustom.Checked = true; break;
-                }
-
-                Analytics.TrackEvent("Loaded a preset");
-
-                if (!wasConnected)
-                    return;
-
-                if (isNewID || ConnectionManager.State != ConnectionState.Connected)
-                    Reconnect();
-                else
-                    SetPresence();
+                var preset = MapPreset(file);
+                this.LoadPreset(preset);
             }
             catch
             {
@@ -1236,6 +1271,7 @@ namespace CustomRPC
                             Button1URL = settings.button1URL,
                             Button2Text = settings.button2Text,
                             Button2URL = settings.button2URL,
+                            FriendlyName = presetFile.FileName,
                         });
                     }
 
@@ -1704,6 +1740,66 @@ namespace CustomRPC
         {
             Utils.SaveSettings();
             SetPresence();
+        }
+
+        private void MainForm_Load(object sender, EventArgs e)
+        {
+
+        }
+
+
+        /// <summary>
+        /// Loads the preset files from the preset directory.
+        /// </summary>
+        /// <param name="directory">The preset directory.</param>
+        private void LoadPresetsFromDirectory(Uri directory)
+        {
+            settings.presetDirectory = directory.AbsolutePath.ToString();
+            Utils.SaveSettings();
+            var directoryInfo = new DirectoryInfo(directory.AbsolutePath.ToString());
+            var files = directoryInfo.GetFiles("*.crp");
+            var presets = files.Select(f => this.MapPreset(f));
+            presetComboBox.Items.Clear();
+            presetComboBox.Text = string.Empty;
+            presetComboBox.Items.AddRange(presets.ToArray());
+
+            presetComboBox.Enabled = presetComboBox.Items.Count > 0 ? true : false;
+
+            // Set selection to active preset
+            if (!string.IsNullOrWhiteSpace(settings.id) && presets.Any(p => p.ID == settings.id))
+            {
+                var activePreset = presets.First(p => p.ID.Equals(settings.id, StringComparison.OrdinalIgnoreCase));
+                presetComboBox.Text = activePreset.FriendlyName;
+            }
+        }
+
+        /// <summary>
+        /// Opens a <see cref="FolderBrowserDialog"/> to set the preset directory.
+        /// </summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The event arguments.</param>
+        private void setPresetDirToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            var dialog = new FolderBrowserDialog();
+            dialog.ShowDialog();
+
+            if (Uri.TryCreate(dialog.SelectedPath, UriKind.Absolute, out var uri))
+            {
+                this.LoadPresetsFromDirectory(uri);
+            }
+        }
+
+        /// <summary>
+        /// Loads a selected preset when the user selects it from the preset combo box.
+        /// </summary>
+        /// <param name="sender">The sender.</param>
+        /// <param name="e">The event arguments.</param>
+        private void PresetComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (presetComboBox.SelectedItem is Preset preset)
+            {
+                this.LoadPreset(preset);
+            }
         }
     }
 }
