@@ -348,6 +348,12 @@ namespace CustomRPC
             if (settings.presetDirectory != null && Uri.TryCreate(settings.presetDirectory, UriKind.Absolute, out presetDirectory))
             {
                 this.LoadPresetsFromDirectory(presetDirectory);
+                this.setPresetDirectoryButton.Visible = false;
+                this.presetComboBox.Visible = true;
+            } else
+            {
+                this.setPresetDirectoryButton.Visible = true;
+                this.presetComboBox.Visible = false;
             }
 
             CheckIfCrashed();
@@ -1165,6 +1171,12 @@ namespace CustomRPC
                 case TimestampType.Custom: radioButtonCustom.Checked = true; break;
             }
 
+            if(settings.presetDirectory != null && Uri.TryCreate(settings.presetDirectory, UriKind.Absolute, out presetDirectory))
+            {
+                this.setPresetDirectoryButton.Visible = false;
+                this.presetComboBox.Visible = true;
+            }
+
             Analytics.TrackEvent("Loaded a preset");
 
             if (!wasConnected)
@@ -1752,7 +1764,6 @@ namespace CustomRPC
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-
         }
 
 
@@ -1779,6 +1790,19 @@ namespace CustomRPC
                 var activePreset = presets.First(p => p.ID.Equals(settings.id, StringComparison.OrdinalIgnoreCase));
                 presetComboBox.Text = activePreset.FriendlyName;
             }
+            this.setPresetDirectoryButton.Visible = false;
+            this.presetComboBox.Visible = true;
+        }
+
+        private void popPresetDirectorySelectionDialog()
+        {
+            var dialog = new FolderBrowserDialog();
+            dialog.ShowDialog();
+
+            if (Uri.TryCreate(dialog.SelectedPath, UriKind.Absolute, out var uri))
+            {
+                this.LoadPresetsFromDirectory(uri);
+            }
         }
 
         /// <summary>
@@ -1788,13 +1812,9 @@ namespace CustomRPC
         /// <param name="e">The event arguments.</param>
         private void setPresetDirToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            var dialog = new FolderBrowserDialog();
-            dialog.ShowDialog();
-
-            if (Uri.TryCreate(dialog.SelectedPath, UriKind.Absolute, out var uri))
-            {
-                this.LoadPresetsFromDirectory(uri);
-            }
+            this.popPresetDirectorySelectionDialog();
+            this.setPresetDirectoryButton.Visible = false;
+            this.presetComboBox.Visible = true;
         }
 
         /// <summary>
@@ -1808,6 +1828,13 @@ namespace CustomRPC
             {
                 this.LoadPreset(preset);
             }
+        }
+
+        private void setPresetDirectoryButton_Click(object sender, EventArgs e)
+        {
+            this.popPresetDirectorySelectionDialog();
+            this.setPresetDirectoryButton.Visible = false;
+            this.presetComboBox.Visible = true;
         }
     }
 }
